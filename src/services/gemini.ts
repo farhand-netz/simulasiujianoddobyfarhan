@@ -1,7 +1,20 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import * as mammoth from "mammoth";
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+let aiInstance: GoogleGenAI | null = null;
+
+function getAI(): GoogleGenAI {
+  if (!aiInstance) {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      console.warn("GEMINI_API_KEY is not set. AI features will not work.");
+      // Return a dummy instance or throw a specific error when actually used
+      // For now, we initialize it, but it will fail when making a request if key is invalid
+    }
+    aiInstance = new GoogleGenAI({ apiKey: apiKey || "dummy_key_to_prevent_crash" });
+  }
+  return aiInstance;
+}
 
 export interface QuizQuestion {
   question: string;
@@ -10,6 +23,7 @@ export interface QuizQuestion {
 }
 
 export async function generateQuizFromText(text: string): Promise<QuizQuestion[]> {
+  const ai = getAI();
   const response = await ai.models.generateContent({
     model: "gemini-3-flash-preview",
     contents: `Ekstrak SEMUA (seluruh) pertanyaan dan pilihan jawaban pilihan ganda dari teks berikut. Pastikan TIDAK ADA SATU PUN pertanyaan yang terlewat.
@@ -63,6 +77,7 @@ export async function generateQuizFromPdf(file: File): Promise<QuizQuestion[]> {
       try {
         const base64Data = (reader.result as string).split(',')[1];
         
+        const ai = getAI();
         const response = await ai.models.generateContent({
           model: "gemini-3-flash-preview",
           contents: [
@@ -137,6 +152,7 @@ export async function generateQuizFromDocx(file: File): Promise<QuizQuestion[]> 
 }
 
 export async function generateQuizFromUrl(url: string): Promise<QuizQuestion[]> {
+  const ai = getAI();
   const response = await ai.models.generateContent({
     model: "gemini-3-flash-preview",
     contents: `Ekstrak SEMUA (seluruh) pertanyaan dan pilihan jawaban pilihan ganda dari konten URL ini: ${url}. Pastikan TIDAK ADA SATU PUN pertanyaan yang terlewat. SANGAT PENTING: Ambil teks pertanyaan dan pilihan jawaban PERSIS SESUAI dengan apa yang tertulis di konten tersebut. JANGAN mengubah, memparafrase, atau menambahkan kata-kata Anda sendiri pada pertanyaan dan pilihan jawaban.`,
