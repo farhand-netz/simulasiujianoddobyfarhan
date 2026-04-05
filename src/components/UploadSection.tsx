@@ -1,9 +1,8 @@
-import React, { useState, useEffect } from 'react';
-import { Loader2, BookOpen, Plus, Trash2 } from 'lucide-react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Loader2, BookOpen, Plus, Trash2, Search, Percent } from 'lucide-react';
 import { generateQuizFromPdf, generateQuizFromDocx, QuizQuestion } from '../services/gemini';
 import { db } from '../firebase';
 import { collection, onSnapshot, addDoc, deleteDoc, doc, serverTimestamp } from 'firebase/firestore';
-import { User } from 'firebase/auth';
 
 interface UploadSectionProps {
   onQuizGenerated: (quiz: QuizQuestion[], materialId?: string) => void;
@@ -18,6 +17,41 @@ interface Material {
   quizData?: string;
 }
 
+interface SearchResult {
+  question: QuizQuestion;
+  materialTitle: string;
+  materialIcon: string;
+  similarity: number;
+}
+
+// Simple bigram similarity function
+function calculateSimilarity(str1: string, str2: string): number {
+  if (str1 === str2) return 100;
+  const s1 = str1.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const s2 = str2.toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (s1.length < 2 || s2.length < 2) return 0;
+  
+  const getBigrams = (str: string) => {
+    const bg = [];
+    for(let i = 0; i < str.length - 1; i++) bg.push(str.slice(i, i+2));
+    return bg;
+  };
+  
+  const bg1 = getBigrams(s1);
+  const bg2 = getBigrams(s2);
+  let intersection = 0;
+  const bg2Copy = [...bg2];
+  
+  for (let i = 0; i < bg1.length; i++) {
+    const idx = bg2Copy.indexOf(bg1[i]);
+    if (idx > -1) {
+      intersection++;
+      bg2Copy.splice(idx, 1);
+    }
+  }
+  return Math.round((2.0 * intersection) / (bg1.length + bg2.length) * 100);
+}
+
 export function UploadSection({ onQuizGenerated, isAdmin }: UploadSectionProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -28,6 +62,8 @@ export function UploadSection({ onQuizGenerated, isAdmin }: UploadSectionProps) 
   const [newMaterialFile, setNewMaterialFile] = useState<File | null>(null);
   const [isAdding, setIsAdding] = useState(false);
   const [materialToDelete, setMaterialToDelete] = useState<string | null>(null);
+  
+  const [searchQuery, setSearchQuery] = useState('');
 
   useEffect(() => {
     const unsubscribe = onSnapshot(collection(db, 'materials'), (snapshot) => {
@@ -106,11 +142,111 @@ export function UploadSection({ onQuizGenerated, isAdmin }: UploadSectionProps) 
     }
   };
 
+  const searchResults = useMemo(() => {
+    if (!searchQuery.trim() || searchQuery.length < 3) return [];
+    
+    const results: SearchResult[] = [];
+    materials.forEach(material => {
+      if (!material.quizData) return;
+      try {
+        const quiz: QuizQuestion[] = JSON.parse(material.quizData);
+        quiz.forEach(q => {
+          const similarity = calculateSimilarity(searchQuery, q.question);
+          if (similarity > 15) { // Minimum threshold
+            results.push({
+              question: q,
+              materialTitle: material.title,
+              materialIcon: material.icon,
+              similarity
+            });
+          }
+        });
+      } catch (e) {
+        // Ignore parse errors for search
+      }
+    });
+    
+    return results.sort((a, b) => b.similarity - a.similarity).slice(0, 10); // Top 10 results
+  }, [searchQuery, materials]);
+
   return (
     <div className="w-full max-w-4xl mx-auto space-y-8">
       <div className="text-center mb-8">
         <h2 className="text-3xl font-bold text-gray-900 mb-2">Pilih Materi Kuis</h2>
-        <p className="text-gray-500">Pilih materi dari library di bawah ini untuk memulai kuis.</p>
+        <p className="text-gray-500">Pilih materi dari library di bawah ini untuk memulai kuis, atau cari pertanyaan.</p>
+      </div>
+
+      {/* Search Section */}
+      <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+        <div className="relative">
+          <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+            <Search className="h-5 w-5 text-gray-400" />
+          </div>
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Cari pertanyaan dari semua library..."
+            className="block w-full pl-11 pr-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-gray-50 text-gray-900"
+          />
+        </div>
+        
+        {searchQuery.length >= 3 && (
+          <div className="mt-4 space-y-3">
+            <h4 className="text-sm font-medium text-gray-500 uppercase tracking-wider">Hasil Pencarian</h4>
+            {searchResults.length === 0 ? (
+              <p className="text-gray-500 text-sm py-2">Tidak ditemukan pertanyaan yang mirip.</p>
+            ) : (
+              <div className="space-y-3 max-h-96 overflow-y-auto pr-2">
+                {searchResults.map((result, idx) => {
+                  const correctIndices = result.question.correctAnswerIndices || [(result.question as any).correctAnswerIndex];
+                  return (
+                    <div key={idx} className="p-4 bg-gray-50 border border-gray-200 rounded-xl">
+                      <div className="flex items-start justify-between gap-4 mb-3">
+                        <p className="font-medium text-gray-900 text-sm">{result.question.question}</p>
+                        <span className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-indigo-100 text-indigo-700 text-xs font-bold whitespace-nowrap">
+                          <Percent className="w-3 h-3" /> {result.similarity}%
+                        </span>
+                      </div>
+                      
+                      <div className="space-y-1.5 mb-4">
+                        {/* Correct Answers */}
+                        {result.question.options.map((opt, i) => {
+                          if (!correctIndices.includes(i)) return null;
+                          return (
+                            <div key={`correct-${i}`} className="flex items-start gap-2 text-sm text-green-700 bg-green-50 px-3 py-2 rounded-lg border border-green-200">
+                              <span className="font-bold mt-0.5">-</span>
+                              <span>{opt}</span>
+                            </div>
+                          );
+                        })}
+                        
+                        {/* Incorrect Answers */}
+                        {result.question.options.map((opt, i) => {
+                          if (correctIndices.includes(i)) return null;
+                          return (
+                            <div key={`wrong-${i}`} className="flex items-start gap-2 text-sm text-red-700 bg-red-50 px-3 py-2 rounded-lg border border-red-100">
+                              <span className="font-bold mt-0.5">-</span>
+                              <span>{opt}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      <div className="flex items-center gap-2 pt-3 border-t border-gray-200 text-xs text-gray-500">
+                        <span>Sumber:</span>
+                        <span className="inline-flex items-center gap-1 px-2 py-1 bg-white border border-gray-200 rounded-md">
+                          <span>{result.materialIcon}</span>
+                          <span className="font-medium">{result.materialTitle}</span>
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Pre-loaded Library Section */}

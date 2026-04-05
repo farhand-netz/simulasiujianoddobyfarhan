@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { QuizQuestion } from '../services/gemini';
-import { Play, CheckCircle2, ArrowLeft, Edit2, Save, X, Plus, Trash2, Loader2 } from 'lucide-react';
+import { Play, CheckCircle2, ArrowLeft, Edit2, Save, X, Plus, Trash2, Loader2, Shuffle } from 'lucide-react';
 import { db } from '../firebase';
 import { doc, updateDoc } from 'firebase/firestore';
 
@@ -17,6 +17,33 @@ export function QuizPreview({ quiz: initialQuiz, materialId, isAdmin, onStart, o
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [editForm, setEditForm] = useState<QuizQuestion | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  
+  // New state for pagination and randomization
+  const [selectedPart, setSelectedPart] = useState<number | 'all'>('all');
+  const [isRandomized, setIsRandomized] = useState(false);
+
+  const questionsPerPage = 10;
+  const totalParts = Math.ceil(quiz.length / questionsPerPage);
+
+  const handleStartQuiz = () => {
+    let finalQuiz = [...quiz];
+    
+    // 1. Randomize if selected
+    if (isRandomized) {
+      for (let i = finalQuiz.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [finalQuiz[i], finalQuiz[j]] = [finalQuiz[j], finalQuiz[i]];
+      }
+    }
+    
+    // 2. Slice by part if selected
+    if (selectedPart !== 'all') {
+      const startIndex = selectedPart * questionsPerPage;
+      finalQuiz = finalQuiz.slice(startIndex, startIndex + questionsPerPage);
+    }
+    
+    onStart(finalQuiz);
+  };
 
   const handleEditClick = (index: number) => {
     setEditingIndex(index);
@@ -106,11 +133,57 @@ export function QuizPreview({ quiz: initialQuiz, materialId, isAdmin, onStart, o
           >
             <ArrowLeft className="w-4 h-4" /> Kembali
           </button>
+        </div>
+      </div>
+
+      {/* Quiz Settings Panel */}
+      <div className="bg-white p-6 rounded-2xl shadow-sm border border-indigo-100 bg-indigo-50/30">
+        <h3 className="text-sm font-bold text-indigo-900 uppercase tracking-wider mb-4">Pengaturan Kuis</h3>
+        <div className="flex flex-col sm:flex-row gap-6 items-start sm:items-center justify-between">
+          <div className="flex flex-col sm:flex-row gap-4 w-full sm:w-auto">
+            {/* Part Selection */}
+            <div className="flex flex-col gap-1.5">
+              <label className="text-sm font-medium text-gray-700">Pilih Bagian Soal</label>
+              <select 
+                value={selectedPart} 
+                onChange={(e) => setSelectedPart(e.target.value === 'all' ? 'all' : Number(e.target.value))}
+                className="px-3 py-2 bg-white border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none min-w-[180px]"
+              >
+                <option value="all">Semua Soal ({quiz.length})</option>
+                {Array.from({ length: totalParts }).map((_, i) => {
+                  const start = i * questionsPerPage + 1;
+                  const end = Math.min((i + 1) * questionsPerPage, quiz.length);
+                  return (
+                    <option key={i} value={i}>
+                      Part {i + 1} (Soal {start} - {end})
+                    </option>
+                  );
+                })}
+              </select>
+            </div>
+
+            {/* Randomize Toggle */}
+            <div className="flex flex-col gap-1.5">
+              <label className="text-sm font-medium text-gray-700">Acak Urutan</label>
+              <button
+                onClick={() => setIsRandomized(!isRandomized)}
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg border transition-colors ${
+                  isRandomized 
+                    ? 'bg-indigo-100 border-indigo-300 text-indigo-700 font-medium' 
+                    : 'bg-white border-gray-300 text-gray-600'
+                }`}
+              >
+                <Shuffle className="w-4 h-4" />
+                {isRandomized ? 'Soal Diacak' : 'Urutan Normal'}
+              </button>
+            </div>
+          </div>
+
           <button 
-            onClick={() => onStart(quiz)} 
-            className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-6 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-xl transition-colors"
+            onClick={handleStartQuiz} 
+            className="w-full sm:w-auto flex items-center justify-center gap-2 px-8 py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl transition-colors shadow-sm"
           >
-            <Play className="w-4 h-4" /> Mulai Kuis
+            <Play className="w-5 h-5" /> Mulai Kuis
           </button>
         </div>
       </div>

@@ -104,9 +104,9 @@ export default function App() {
         <div className="max-w-5xl mx-auto px-4 flex flex-col items-center gap-3">
           <p className="text-center text-sm font-medium text-red-600 leading-relaxed">
             Dilarang keras share link website ini karena menyangkut kebijakan internal PT. Selalu Bahagia Sejahtera. <br className="hidden sm:block" />
-            Website ini dibuat oleh Farhan dengan tujuan untuk edukasi agar mengingat semua pertanyaan.
+            Website ini dibuat oleh Farhan dengan tujuan untuk edukasi agar mengingat semua pertanyaan. dengan tanggung jawab yg besar mohon untuk pengertiannya.
           </p>
-          <p className="text-xs text-slate-400 font-medium tracking-wide">Version 1.0</p>
+          <p className="text-xs text-slate-400 font-medium tracking-wide">Version 1.1</p>
         </div>
       </footer>
     </div>
