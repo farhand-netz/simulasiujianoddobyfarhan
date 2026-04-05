@@ -1,0 +1,5 @@
+{
+  "name": "Brain Quiz Generator",
+  "description": "Generate interactive quizzes from PDF, DOCX, or web links using AI.",
+  "requestFramePermissions": []
+}

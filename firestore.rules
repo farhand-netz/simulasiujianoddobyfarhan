@@ -1,0 +1,43 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    // Collection: materials
+    // Document ID: auto-generated
+    // Fields:
+    //   - title: string (required, max 100 chars)
+    //   - icon: string (required, max 10 chars)
+    //   - quizData: string (required, JSON string of quiz)
+    //   - createdAt: timestamp (optional)
+    // ===============================================================
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && 
+        request.auth.token.email == "muhammad.farhan.ramadhan.n@gmail.com" && 
+        request.auth.token.email_verified == true;
+    }
+
+    function isValidMaterial(data) {
+      return data.keys().hasAll(['title', 'icon', 'quizData']) &&
+             data.title is string && data.title.size() > 0 && data.title.size() <= 100 &&
+             data.icon is string && data.icon.size() > 0 && data.icon.size() <= 10 &&
+             data.quizData is string && data.quizData.size() > 0;
+    }
+
+    match /materials/{materialId} {
+      // Allow public read access so anyone can play the quiz
+      allow read: if true;
+      
+      // Only admin can create, update, or delete materials
+      allow create: if isAdmin() && isValidMaterial(request.resource.data);
+      allow update: if isAdmin() && isValidMaterial(request.resource.data);
+      allow delete: if isAdmin();
+    }
+  }
+}

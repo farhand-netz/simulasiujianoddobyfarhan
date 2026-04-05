@@ -1,0 +1,22 @@
+{
+  "entities": {
+    "Material": {
+      "title": "Material",
+      "description": "A pre-loaded quiz material (document link or web link).",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string", "description": "Title of the material" },
+        "icon": { "type": "string", "description": "Emoji icon for the material" },
+        "url": { "type": "string", "description": "Public URL to the document or web page" },
+        "createdAt": { "type": "timestamp", "description": "When this material was added" }
+      },
+      "required": ["title", "icon", "url"]
+    }
+  },
+  "firestore": {
+    "/materials/{materialId}": {
+      "schema": "Material",
+      "description": "Collection of available quiz materials."
+    }
+  }
+}
