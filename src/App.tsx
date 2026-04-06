@@ -69,7 +69,7 @@ export default function App() {
               <BrainCircuit className="w-6 h-6 text-white" />
             </div>
             <h1 className="text-xl font-bold tracking-tight text-slate-900 dark:text-white drop-shadow-sm hover:drop-shadow-[0_0_8px_rgba(99,102,241,0.8)] transition-all duration-300">
-              2026 Simulasi Ujian Sertifikasi Senior Technical Engineer LV1
+              Simulasi Ujian Oppo
             </h1>
           </div>
           
