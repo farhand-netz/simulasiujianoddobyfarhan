@@ -93,18 +93,18 @@ export function QuizPlayer({ quiz, onRestart }: QuizPlayerProps) {
       <motion.div 
         initial={{ opacity: 0, scale: 0.9 }}
         animate={{ opacity: 1, scale: 1 }}
-        className="w-full max-w-2xl mx-auto p-8 bg-white rounded-2xl shadow-xl border border-gray-100 text-center"
+        className="w-full max-w-2xl mx-auto p-8 bg-white dark:bg-slate-900 rounded-2xl shadow-xl border border-gray-100 dark:border-slate-800 text-center transition-colors duration-300"
       >
-        <h2 className="text-4xl font-bold text-gray-900 mb-4">Quiz Complete!</h2>
-        <div className="text-6xl font-black text-indigo-600 mb-6">
+        <h2 className="text-4xl font-bold text-gray-900 dark:text-white mb-4">Quiz Complete!</h2>
+        <div className="text-6xl font-black text-indigo-600 dark:text-indigo-400 mb-6">
           {percentage}%
         </div>
-        <p className="text-xl text-gray-600 mb-8">
+        <p className="text-xl text-gray-600 dark:text-slate-400 mb-8">
           You scored {score} out of {quiz.length} questions correctly.
         </p>
         <button
           onClick={onRestart}
-          className="inline-flex items-center gap-2 px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-xl transition-colors"
+          className="inline-flex items-center gap-2 px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-xl transition-colors shadow-lg shadow-indigo-200 dark:shadow-none"
         >
           <RotateCcw className="w-5 h-5" />
           Create Another Quiz
@@ -116,10 +116,10 @@ export function QuizPlayer({ quiz, onRestart }: QuizPlayerProps) {
   return (
     <div className="w-full max-w-3xl mx-auto">
       <div className="mb-6 flex items-center justify-between">
-        <span className="px-4 py-1.5 bg-indigo-100 text-indigo-800 font-semibold rounded-full text-sm">
+        <span className="px-4 py-1.5 bg-indigo-100 dark:bg-indigo-900/40 text-indigo-800 dark:text-indigo-300 font-semibold rounded-full text-sm transition-colors">
           Question {currentIndex + 1} of {quiz.length}
         </span>
-        <span className="text-gray-500 font-medium">Score: {score}</span>
+        <span className="text-gray-500 dark:text-slate-400 font-medium">Score: {score}</span>
       </div>
 
       <AnimatePresence mode="wait">
@@ -128,9 +128,9 @@ export function QuizPlayer({ quiz, onRestart }: QuizPlayerProps) {
           initial={{ opacity: 0, x: 20 }}
           animate={{ opacity: 1, x: 0 }}
           exit={{ opacity: 0, x: -20 }}
-          className="bg-white p-6 md:p-8 rounded-2xl shadow-xl border border-gray-100"
+          className="bg-white dark:bg-slate-900 p-6 md:p-8 rounded-2xl shadow-xl border border-gray-100 dark:border-slate-800 transition-colors duration-300"
         >
-          <h3 className="text-2xl font-bold text-gray-900 mb-8 leading-tight">
+          <h3 className="text-2xl font-bold text-gray-900 dark:text-white mb-8 leading-tight">
             {currentQuestion.question}
           </h3>
 
@@ -143,15 +143,15 @@ export function QuizPlayer({ quiz, onRestart }: QuizPlayerProps) {
               
               if (!isAnswered) {
                 buttonClass += isSelected 
-                  ? "border-indigo-500 bg-indigo-50 text-indigo-800" 
-                  : "border-gray-200 hover:border-indigo-300 hover:bg-indigo-50 text-gray-700";
+                  ? "border-indigo-500 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-800 dark:text-indigo-300" 
+                  : "border-gray-200 dark:border-slate-700 hover:border-indigo-300 dark:hover:border-indigo-500 hover:bg-indigo-50 dark:hover:bg-indigo-900/10 text-gray-700 dark:text-slate-300";
               } else {
                 if (isCorrect) {
-                  buttonClass += "border-green-500 bg-green-50 text-green-800";
+                  buttonClass += "border-green-500 bg-green-50 dark:bg-green-900/20 text-green-800 dark:text-green-300";
                 } else if (isSelected) {
-                  buttonClass += "border-red-500 bg-red-50 text-red-800";
+                  buttonClass += "border-red-500 bg-red-50 dark:bg-red-900/20 text-red-800 dark:text-red-300";
                 } else {
-                  buttonClass += "border-gray-200 bg-gray-50 text-gray-400 opacity-60";
+                  buttonClass += "border-gray-200 dark:border-slate-800 bg-gray-50 dark:bg-slate-800/50 text-gray-400 dark:text-slate-600 opacity-60";
                 }
               }
 
@@ -180,7 +180,7 @@ export function QuizPlayer({ quiz, onRestart }: QuizPlayerProps) {
                 <div className="flex justify-end">
                   <button
                     onClick={handleSubmitAnswer}
-                    className="flex items-center gap-2 px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-xl transition-colors"
+                    className="flex items-center gap-2 px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-xl transition-colors shadow-lg shadow-indigo-200 dark:shadow-none"
                   >
                     Submit Answer
                   </button>
@@ -196,7 +196,7 @@ export function QuizPlayer({ quiz, onRestart }: QuizPlayerProps) {
                 <div className="flex justify-end">
                   <button
                     onClick={handleNext}
-                    className="flex items-center gap-2 px-6 py-3 bg-gray-900 hover:bg-gray-800 text-white font-semibold rounded-xl transition-colors"
+                    className="flex items-center gap-2 px-6 py-3 bg-slate-900 dark:bg-indigo-600 hover:bg-slate-800 dark:hover:bg-indigo-700 text-white font-semibold rounded-xl transition-colors shadow-lg"
                   >
                     {currentIndex < quiz.length - 1 ? 'Next Question' : 'Finish Quiz'}
                     <ArrowRight className="w-5 h-5" />
