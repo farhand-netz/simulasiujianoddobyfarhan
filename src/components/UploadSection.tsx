@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Loader2, BookOpen, Plus, Trash2, Search, Percent } from 'lucide-react';
-import { generateQuizFromPdf, generateQuizFromDocx, QuizQuestion } from '../services/gemini';
+import { generateQuizFromPdf, generateQuizFromDocx, generateQuizFromXlsx, QuizQuestion } from '../services/gemini';
 import { db } from '../firebase';
 import { collection, onSnapshot, addDoc, deleteDoc, doc, serverTimestamp } from 'firebase/firestore';
 
@@ -91,6 +91,8 @@ export function UploadSection({ onQuizGenerated, isAdmin }: UploadSectionProps) 
         quiz = await generateQuizFromPdf(newMaterialFile);
       } else if (newMaterialFile.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' || newMaterialFile.name.endsWith('.docx')) {
         quiz = await generateQuizFromDocx(newMaterialFile);
+      } else if (newMaterialFile.type === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' || newMaterialFile.name.endsWith('.xlsx')) {
+        quiz = await generateQuizFromXlsx(newMaterialFile);
       } else {
         throw new Error('Unsupported file type.');
       }
@@ -382,15 +384,15 @@ export function UploadSection({ onQuizGenerated, isAdmin }: UploadSectionProps) 
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">File Dokumen (PDF/DOCX)</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">File Dokumen (PDF/DOCX/XLSX)</label>
                 <input 
                   type="file" 
                   required
-                  accept=".pdf,.docx"
+                  accept=".pdf,.docx,.xlsx"
                   onChange={e => setNewMaterialFile(e.target.files?.[0] || null)}
                   className="w-full px-3 py-2 border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-gray-900 dark:text-white rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition-colors duration-300"
                 />
-                <p className="text-xs text-gray-500 dark:text-slate-400 mt-1">Sistem akan mengekstrak soal dari file ini dan menyimpannya ke database.</p>
+                <p className="text-xs text-gray-500 dark:text-slate-400 mt-1">Sistem akan mengekstrak soal dari file ini dan menyimpannya ke database. Untuk file XLSX, tandai jawaban benar dengan warna (highlight).</p>
               </div>
               <div className="flex justify-end gap-3 mt-6">
                 <button 
