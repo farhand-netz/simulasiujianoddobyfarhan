@@ -65,10 +65,12 @@ export default function App() {
       <header className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 sticky top-0 z-10 transition-colors duration-300">
         <div className="max-w-5xl mx-auto px-4 h-16 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="bg-indigo-600 p-2 rounded-lg">
+            <div className="bg-indigo-600 p-2 rounded-lg shadow-[0_0_15px_rgba(79,70,229,0.5)]">
               <BrainCircuit className="w-6 h-6 text-white" />
             </div>
-            <h1 className="text-xl font-bold tracking-tight text-slate-900 dark:text-white">Simulasi ujian oppo agar lulus semua yaa</h1>
+            <h1 className="text-xl font-bold tracking-tight text-slate-900 dark:text-white drop-shadow-sm hover:drop-shadow-[0_0_8px_rgba(99,102,241,0.8)] transition-all duration-300">
+              2026 Simulasi Ujian Sertifikasi Senior Technical Engineer LV1
+            </h1>
           </div>
           
           <div className="flex items-center gap-2 sm:gap-4">

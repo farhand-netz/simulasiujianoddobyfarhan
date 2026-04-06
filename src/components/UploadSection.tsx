@@ -272,26 +272,42 @@ export function UploadSection({ onQuizGenerated, isAdmin }: UploadSectionProps) 
           </div>
         ) : (
           <div className="flex flex-col gap-4">
-            {materials.map((topic) => (
-              <button
-                key={topic.id}
-                onClick={() => handleLibraryClick(topic)}
-                disabled={loading || isAdding}
-                className="relative flex items-center gap-3 p-4 rounded-xl border border-gray-200 dark:border-slate-700 hover:border-indigo-300 dark:hover:border-indigo-500 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 transition-all text-left group disabled:opacity-50"
-              >
-                <span className="text-2xl group-hover:scale-110 transition-transform flex-shrink-0">{topic.icon}</span>
-                <span className="font-medium text-gray-700 dark:text-slate-300 group-hover:text-indigo-700 dark:group-hover:text-indigo-300 pr-8 transition-colors">{topic.title}</span>
-                
-                {isAdmin && (
-                  <div 
-                    onClick={(e) => handleDeleteClick(e, topic.id)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 p-1.5 text-red-500 hover:bg-red-100 dark:hover:bg-red-900/40 rounded-md transition-all"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </div>
-                )}
-              </button>
-            ))}
+            {materials.map((topic) => {
+              const isTargetLibrary = topic.title === '2026 Simulasi Ujian Sertifikasi Senior Technical Engineer LV1';
+              
+              return (
+                <button
+                  key={topic.id}
+                  onClick={() => handleLibraryClick(topic)}
+                  disabled={loading || isAdding}
+                  className={`relative flex items-center gap-3 p-4 rounded-xl border border-gray-200 dark:border-slate-700 transition-all duration-300 text-left group disabled:opacity-50 overflow-hidden ${
+                    isTargetLibrary 
+                      ? 'hover:border-indigo-400 dark:hover:border-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 hover:shadow-[0_0_15px_rgba(99,102,241,0.3)]' 
+                      : 'hover:border-indigo-300 dark:hover:border-indigo-500 hover:bg-indigo-50 dark:hover:bg-indigo-900/20'
+                  }`}
+                >
+                  <span className="text-2xl group-hover:scale-110 transition-transform flex-shrink-0 relative z-10">{topic.icon}</span>
+                  <span className="font-medium text-gray-700 dark:text-slate-300 group-hover:text-indigo-700 dark:group-hover:text-indigo-300 transition-colors relative z-10">{topic.title}</span>
+                  
+                  {isTargetLibrary && (
+                    <div className="ml-auto flex items-center gap-3 opacity-0 group-hover:opacity-100 transition-all duration-300 translate-x-4 group-hover:translate-x-0 relative z-10 pr-8">
+                      <span className="text-xs font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider bg-indigo-100 dark:bg-indigo-900/50 px-2 py-1 rounded-md whitespace-nowrap">
+                        Fokus disini ✨
+                      </span>
+                    </div>
+                  )}
+
+                  {isAdmin && (
+                    <div 
+                      onClick={(e) => handleDeleteClick(e, topic.id)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 p-1.5 text-red-500 hover:bg-red-100 dark:hover:bg-red-900/40 rounded-md transition-all z-20"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </div>
+                  )}
+                </button>
+              );
+            })}
           </div>
         )}
       </div>
