@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Loader2, BookOpen, Plus, Trash2, Search, Percent } from 'lucide-react';
-import { generateQuizFromPdf, generateQuizFromDocx, generateQuizFromXlsx, QuizQuestion } from '../services/gemini';
-import { db } from '../firebase';
-import { collection, onSnapshot, addDoc, deleteDoc, doc, serverTimestamp } from 'firebase/firestore';
+import { Loader2, BookOpen, Plus, Trash2, Search, Percent, Edit2, FilePlus } from 'lucide-react';
+import { generateQuizFromPdf, generateQuizFromDocx, generateQuizFromXlsx, generateQuizFromXlsxBuffer, generateQuizFromImage, generateQuizFromUrl, QuizQuestion } from '../services/gemini';
+import { db, handleFirestoreError, OperationType } from '../firebase';
+import { collection, onSnapshot, addDoc, deleteDoc, doc, serverTimestamp, updateDoc } from 'firebase/firestore';
 
 interface UploadSectionProps {
   onQuizGenerated: (quiz: QuizQuestion[], materialId?: string) => void;
@@ -59,11 +59,18 @@ export function UploadSection({ onQuizGenerated, isAdmin }: UploadSectionProps) 
   const [materials, setMaterials] = useState<Material[]>([]);
   const [showAddModal, setShowAddModal] = useState(false);
   const [newMaterial, setNewMaterial] = useState({ title: '', icon: '📚' });
+  const [inputType, setInputType] = useState<'file' | 'url'>('file');
+  const [newMaterialUrl, setNewMaterialUrl] = useState('');
   const [newMaterialFile, setNewMaterialFile] = useState<File | null>(null);
   const [isAdding, setIsAdding] = useState(false);
   const [materialToDelete, setMaterialToDelete] = useState<string | null>(null);
   
   const [searchQuery, setSearchQuery] = useState('');
+
+  const [renamingMaterial, setRenamingMaterial] = useState<Material | null>(null);
+  const [newTitle, setNewTitle] = useState('');
+  const [addingToMaterial, setAddingToMaterial] = useState<Material | null>(null);
+  const [isUpdating, setIsUpdating] = useState(false);
 
   useEffect(() => {
     const unsubscribe = onSnapshot(collection(db, 'materials'), (snapshot) => {
@@ -73,7 +80,7 @@ export function UploadSection({ onQuizGenerated, isAdmin }: UploadSectionProps) 
       });
       setMaterials(materialsData);
     }, (err) => {
-      console.error("Error fetching materials:", err);
+      handleFirestoreError(err, OperationType.GET, 'materials');
     });
 
     return () => unsubscribe();
@@ -81,31 +88,62 @@ export function UploadSection({ onQuizGenerated, isAdmin }: UploadSectionProps) 
 
   const handleAddMaterial = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newMaterial.title || !newMaterialFile) return;
+    if (!newMaterial.title) return;
+    if (inputType === 'file' && !newMaterialFile) return;
+    if (inputType === 'url' && !newMaterialUrl) return;
     
     setIsAdding(true);
     setError(null);
     try {
       let quiz: QuizQuestion[];
-      if (newMaterialFile.type === 'application/pdf' || newMaterialFile.name.endsWith('.pdf')) {
-        quiz = await generateQuizFromPdf(newMaterialFile);
-      } else if (newMaterialFile.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' || newMaterialFile.name.endsWith('.docx')) {
-        quiz = await generateQuizFromDocx(newMaterialFile);
-      } else if (newMaterialFile.type === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' || newMaterialFile.name.endsWith('.xlsx')) {
-        quiz = await generateQuizFromXlsx(newMaterialFile);
+      
+      if (inputType === 'url') {
+        if (newMaterialUrl.includes('docs.google.com/spreadsheets')) {
+          const proxyResponse = await fetch(`/api/proxy/gsheet?url=${encodeURIComponent(newMaterialUrl)}`);
+          if (!proxyResponse.ok) {
+            const errorData = await proxyResponse.json().catch(() => ({}));
+            throw new Error(errorData.error || 'Gagal mengunduh Google Sheet. Pastikan link valid dan dapat diakses publik.');
+          }
+          const arrayBuffer = await proxyResponse.arrayBuffer();
+          quiz = await generateQuizFromXlsxBuffer(arrayBuffer);
+        } else {
+          quiz = await generateQuizFromUrl(newMaterialUrl);
+        }
+      } else if (newMaterialFile) {
+        if (newMaterialFile.type === 'application/pdf' || newMaterialFile.name.endsWith('.pdf')) {
+          quiz = await generateQuizFromPdf(newMaterialFile);
+        } else if (newMaterialFile.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' || newMaterialFile.name.endsWith('.docx')) {
+          quiz = await generateQuizFromDocx(newMaterialFile);
+        } else if (newMaterialFile.type === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' || 
+                   newMaterialFile.type === 'application/vnd.ms-excel' || 
+                   newMaterialFile.name.endsWith('.xlsx') || 
+                   newMaterialFile.name.endsWith('.xls')) {
+          quiz = await generateQuizFromXlsx(newMaterialFile);
+        } else if (newMaterialFile.type.startsWith('image/')) {
+          quiz = await generateQuizFromImage(newMaterialFile);
+        } else {
+          throw new Error('Unsupported file type.');
+        }
       } else {
-        throw new Error('Unsupported file type.');
+        throw new Error('No input provided.');
       }
 
-      const docRef = await addDoc(collection(db, 'materials'), {
-        title: newMaterial.title,
-        icon: newMaterial.icon,
-        quizData: JSON.stringify(quiz),
-        createdAt: serverTimestamp()
-      });
+      let docRef;
+      try {
+        docRef = await addDoc(collection(db, 'materials'), {
+          title: newMaterial.title,
+          icon: newMaterial.icon,
+          quizData: JSON.stringify(quiz),
+          createdAt: serverTimestamp()
+        });
+      } catch (err: any) {
+        handleFirestoreError(err, OperationType.WRITE, 'materials');
+        throw err;
+      }
       setShowAddModal(false);
       setNewMaterial({ title: '', icon: '📚' });
       setNewMaterialFile(null);
+      setNewMaterialUrl('');
       
       // Auto-start preview for the newly added material
       onQuizGenerated(quiz, docRef.id);
@@ -113,6 +151,104 @@ export function UploadSection({ onQuizGenerated, isAdmin }: UploadSectionProps) 
       setError("Failed to add material: " + err.message);
     } finally {
       setIsAdding(false);
+    }
+  };
+
+  const handleRename = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!renamingMaterial || !newTitle.trim()) return;
+
+    setIsUpdating(true);
+    try {
+      try {
+        await updateDoc(doc(db, 'materials', renamingMaterial.id), {
+          title: newTitle.trim()
+        });
+      } catch (err: any) {
+        handleFirestoreError(err, OperationType.WRITE, `materials/${renamingMaterial.id}`);
+      }
+      setRenamingMaterial(null);
+      setNewTitle('');
+    } catch (err: any) {
+      setError("Gagal mengubah nama: " + err.message);
+    } finally {
+      setIsUpdating(false);
+    }
+  };
+
+  const handleAddMoreQuestions = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!addingToMaterial) return;
+    if (inputType === 'file' && !newMaterialFile) return;
+    if (inputType === 'url' && !newMaterialUrl) return;
+
+    setIsUpdating(true);
+    setError(null);
+    try {
+      let newQuiz: QuizQuestion[];
+      
+      if (inputType === 'url') {
+        if (newMaterialUrl.includes('docs.google.com/spreadsheets')) {
+          const proxyResponse = await fetch(`/api/proxy/gsheet?url=${encodeURIComponent(newMaterialUrl)}`);
+          if (!proxyResponse.ok) {
+            const errorData = await proxyResponse.json().catch(() => ({}));
+            throw new Error(errorData.error || 'Gagal mengunduh Google Sheet.');
+          }
+          const arrayBuffer = await proxyResponse.arrayBuffer();
+          newQuiz = await generateQuizFromXlsxBuffer(arrayBuffer);
+        } else {
+          newQuiz = await generateQuizFromUrl(newMaterialUrl);
+        }
+      } else if (newMaterialFile) {
+        if (newMaterialFile.type === 'application/pdf' || newMaterialFile.name.endsWith('.pdf')) {
+          newQuiz = await generateQuizFromPdf(newMaterialFile);
+        } else if (newMaterialFile.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' || newMaterialFile.name.endsWith('.docx')) {
+          newQuiz = await generateQuizFromDocx(newMaterialFile);
+        } else if (newMaterialFile.type === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' || 
+                   newMaterialFile.type === 'application/vnd.ms-excel' || 
+                   newMaterialFile.name.endsWith('.xlsx') || 
+                   newMaterialFile.name.endsWith('.xls')) {
+          newQuiz = await generateQuizFromXlsx(newMaterialFile);
+        } else if (newMaterialFile.type.startsWith('image/')) {
+          newQuiz = await generateQuizFromImage(newMaterialFile);
+        } else {
+          throw new Error('Unsupported file type.');
+        }
+      } else {
+        throw new Error('No input provided.');
+      }
+
+      // Merge and de-duplicate
+      const existingQuiz: QuizQuestion[] = addingToMaterial.quizData ? JSON.parse(addingToMaterial.quizData) : [];
+      const questionMap = new Map<string, QuizQuestion>();
+      
+      existingQuiz.forEach(q => questionMap.set(q.question.trim().toLowerCase(), q));
+      newQuiz.forEach(q => {
+        if (!questionMap.has(q.question.trim().toLowerCase())) {
+          questionMap.set(q.question.trim().toLowerCase(), q);
+        }
+      });
+      
+      const mergedQuiz = Array.from(questionMap.values());
+
+      try {
+        await updateDoc(doc(db, 'materials', addingToMaterial.id), {
+          quizData: JSON.stringify(mergedQuiz)
+        });
+      } catch (err: any) {
+        handleFirestoreError(err, OperationType.WRITE, `materials/${addingToMaterial.id}`);
+      }
+
+      setAddingToMaterial(null);
+      setNewMaterialFile(null);
+      setNewMaterialUrl('');
+      
+      // Update the active quiz if we are currently taking it
+      onQuizGenerated(mergedQuiz, addingToMaterial.id);
+    } catch (err: any) {
+      setError("Gagal menambah soal: " + err.message);
+    } finally {
+      setIsUpdating(false);
     }
   };
 
@@ -125,7 +261,11 @@ export function UploadSection({ onQuizGenerated, isAdmin }: UploadSectionProps) 
     if (!materialToDelete) return;
     
     try {
-      await deleteDoc(doc(db, 'materials', materialToDelete));
+      try {
+        await deleteDoc(doc(db, 'materials', materialToDelete));
+      } catch (err: any) {
+        handleFirestoreError(err, OperationType.DELETE, `materials/${materialToDelete}`);
+      }
       setMaterialToDelete(null);
     } catch (err: any) {
       setError("Failed to delete material: " + err.message);
@@ -186,7 +326,7 @@ export function UploadSection({ onQuizGenerated, isAdmin }: UploadSectionProps) 
           </div>
           <input
             type="text"
-            value={searchQuery}
+            value={searchQuery || ''}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Cari pertanyaan dari semua library..."
             className="block w-full pl-11 pr-4 py-3 border border-gray-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-gray-50 dark:bg-slate-800 text-gray-900 dark:text-white transition-colors duration-300"
@@ -278,18 +418,21 @@ export function UploadSection({ onQuizGenerated, isAdmin }: UploadSectionProps) 
               const isTargetLibrary = topic.title === '2026 Simulasi Ujian Sertifikasi Senior Technical Engineer LV1';
               
               return (
-                <button
+                <div
                   key={topic.id}
-                  onClick={() => handleLibraryClick(topic)}
-                  disabled={loading || isAdding}
-                  className={`relative flex items-center gap-3 p-4 rounded-xl border border-gray-200 dark:border-slate-700 transition-all duration-300 text-left group disabled:opacity-50 overflow-hidden ${
+                  onClick={() => !(loading || isAdding) && handleLibraryClick(topic)}
+                  className={`relative flex items-center gap-3 p-4 rounded-xl border border-gray-200 dark:border-slate-700 transition-all duration-300 text-left group overflow-hidden cursor-pointer ${
+                    (loading || isAdding) ? 'opacity-50 cursor-not-allowed' : ''
+                  } ${
                     isTargetLibrary 
                       ? 'hover:border-indigo-400 dark:hover:border-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 hover:shadow-[0_0_15px_rgba(99,102,241,0.3)]' 
                       : 'hover:border-indigo-300 dark:hover:border-indigo-500 hover:bg-indigo-50 dark:hover:bg-indigo-900/20'
                   }`}
                 >
                   <span className="text-2xl group-hover:scale-110 transition-transform flex-shrink-0 relative z-10">{topic.icon}</span>
-                  <span className="font-medium text-gray-700 dark:text-slate-300 group-hover:text-indigo-700 dark:group-hover:text-indigo-300 transition-colors relative z-10">{topic.title}</span>
+                  <span className={`font-medium text-gray-700 dark:text-slate-300 group-hover:text-indigo-700 dark:group-hover:text-indigo-300 transition-colors relative z-10 flex-1 break-words ${isAdmin ? 'pr-28 sm:pr-0' : ''}`}>
+                    {topic.title}
+                  </span>
                   
                   {isTargetLibrary && (
                     <div className="ml-auto flex items-center gap-3 opacity-0 group-hover:opacity-100 transition-all duration-300 translate-x-4 group-hover:translate-x-0 relative z-10 pr-8">
@@ -300,14 +443,38 @@ export function UploadSection({ onQuizGenerated, isAdmin }: UploadSectionProps) 
                   )}
 
                   {isAdmin && (
-                    <div 
-                      onClick={(e) => handleDeleteClick(e, topic.id)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 p-1.5 text-red-500 hover:bg-red-100 dark:hover:bg-red-900/40 rounded-md transition-all z-20"
-                    >
-                      <Trash2 className="w-4 h-4" />
+                    <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-0.5 sm:opacity-0 sm:group-hover:opacity-100 transition-all z-20 bg-white/90 dark:bg-slate-900/90 sm:bg-transparent backdrop-blur-sm sm:backdrop-blur-none p-1 sm:p-0 rounded-lg shadow-sm sm:shadow-none border border-gray-100 dark:border-slate-800 sm:border-none">
+                      <button 
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setAddingToMaterial(topic);
+                        }}
+                        title="Tambah Soal"
+                        className="p-2 sm:p-1.5 text-emerald-600 hover:bg-emerald-100 dark:hover:bg-emerald-900/40 rounded-md transition-all active:scale-95"
+                      >
+                        <FilePlus className="w-5 h-5 sm:w-4 h-4" />
+                      </button>
+                      <button 
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setRenamingMaterial(topic);
+                          setNewTitle(topic.title);
+                        }}
+                        title="Rename Materi"
+                        className="p-2 sm:p-1.5 text-amber-600 hover:bg-amber-100 dark:hover:bg-amber-900/40 rounded-md transition-all active:scale-95"
+                      >
+                        <Edit2 className="w-5 h-5 sm:w-4 h-4" />
+                      </button>
+                      <button 
+                        onClick={(e) => handleDeleteClick(e, topic.id)}
+                        title="Hapus Materi"
+                        className="p-2 sm:p-1.5 text-red-500 hover:bg-red-100 dark:hover:bg-red-900/40 rounded-md transition-all active:scale-95"
+                      >
+                        <Trash2 className="w-5 h-5 sm:w-4 h-4" />
+                      </button>
                     </div>
                   )}
-                </button>
+                </div>
               );
             })}
           </div>
@@ -365,7 +532,7 @@ export function UploadSection({ onQuizGenerated, isAdmin }: UploadSectionProps) 
                 <input 
                   type="text" 
                   required
-                  value={newMaterial.title}
+                  value={newMaterial.title || ''}
                   onChange={e => setNewMaterial({...newMaterial, title: e.target.value})}
                   className="w-full px-3 py-2 border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-gray-900 dark:text-white rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition-colors duration-300"
                   placeholder="Contoh: Sejarah Proklamasi"
@@ -377,22 +544,63 @@ export function UploadSection({ onQuizGenerated, isAdmin }: UploadSectionProps) 
                   type="text" 
                   required
                   maxLength={2}
-                  value={newMaterial.icon}
+                  value={newMaterial.icon || ''}
                   onChange={e => setNewMaterial({...newMaterial, icon: e.target.value})}
                   className="w-full px-3 py-2 border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-gray-900 dark:text-white rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition-colors duration-300"
                   placeholder="📚"
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">File Dokumen (PDF/DOCX/XLSX)</label>
-                <input 
-                  type="file" 
-                  required
-                  accept=".pdf,.docx,.xlsx"
-                  onChange={e => setNewMaterialFile(e.target.files?.[0] || null)}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-gray-900 dark:text-white rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition-colors duration-300"
-                />
-                <p className="text-xs text-gray-500 dark:text-slate-400 mt-1">Sistem akan mengekstrak soal dari file ini dan menyimpannya ke database. Untuk file XLSX, tandai jawaban benar dengan warna (highlight).</p>
+                <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">Sumber Materi</label>
+                <div className="flex gap-4 mb-3">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input 
+                      type="radio" 
+                      name="inputType" 
+                      value="file" 
+                      checked={inputType === 'file'} 
+                      onChange={() => setInputType('file')}
+                      className="text-indigo-600 focus:ring-indigo-500"
+                    />
+                    <span className="text-sm text-gray-700 dark:text-slate-300">Upload File</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input 
+                      type="radio" 
+                      name="inputType" 
+                      value="url" 
+                      checked={inputType === 'url'} 
+                      onChange={() => setInputType('url')}
+                      className="text-indigo-600 focus:ring-indigo-500"
+                    />
+                    <span className="text-sm text-gray-700 dark:text-slate-300">Link URL (GSheet/GForm)</span>
+                  </label>
+                </div>
+
+                {inputType === 'file' ? (
+                  <>
+                    <input 
+                      type="file" 
+                      required={inputType === 'file'}
+                      accept=".pdf,.docx,.xlsx,.xls,image/*"
+                      onChange={e => setNewMaterialFile(e.target.files?.[0] || null)}
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-gray-900 dark:text-white rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition-colors duration-300"
+                    />
+                    <p className="text-xs text-gray-500 dark:text-slate-400 mt-1">Format: PDF, DOCX, XLSX/XLS, Gambar (JPG/PNG). Untuk file spreadsheet, tandai jawaban benar dengan warna (highlight).</p>
+                  </>
+                ) : (
+                  <>
+                    <input 
+                      type="url" 
+                      required={inputType === 'url'}
+                      value={newMaterialUrl || ''}
+                      onChange={e => setNewMaterialUrl(e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-gray-900 dark:text-white rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition-colors duration-300"
+                      placeholder="https://docs.google.com/spreadsheets/d/..."
+                    />
+                    <p className="text-xs text-gray-500 dark:text-slate-400 mt-1">Pastikan akses spreadsheet diset ke "Tahu Tautan Ini" (Anyone with the link). Tandai jawaban benar dengan warna (highlight).</p>
+                  </>
+                )}
               </div>
               <div className="flex justify-end gap-3 mt-6">
                 <button 
@@ -405,11 +613,126 @@ export function UploadSection({ onQuizGenerated, isAdmin }: UploadSectionProps) 
                 </button>
                 <button 
                   type="submit" 
-                  disabled={isAdding || !newMaterialFile}
+                  disabled={isAdding || (inputType === 'file' ? !newMaterialFile : !newMaterialUrl)}
                   className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white rounded-lg font-medium transition-colors shadow-sm"
                 >
                   {isAdding ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
                   {isAdding ? 'Memproses...' : 'Simpan'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Rename Material Modal */}
+      {renamingMaterial && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 w-full max-w-sm shadow-xl border border-slate-200 dark:border-slate-800 transition-colors duration-300">
+            <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-4">Ubah Nama Materi</h3>
+            <form onSubmit={handleRename} className="space-y-4">
+              <input 
+                type="text" 
+                autoFocus
+                required
+                value={newTitle || ''}
+                onChange={e => setNewTitle(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-gray-900 dark:text-white rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition-colors duration-300"
+              />
+              <div className="flex justify-end gap-3 pt-2">
+                <button 
+                  type="button" 
+                  onClick={() => setRenamingMaterial(null)}
+                  className="px-4 py-2 text-gray-600 dark:text-slate-400 hover:bg-gray-100 dark:hover:bg-slate-800 rounded-lg font-medium transition-colors"
+                >
+                  Batal
+                </button>
+                <button 
+                  type="submit" 
+                  disabled={isUpdating}
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-medium transition-all flex items-center gap-2"
+                >
+                  {isUpdating && <Loader2 className="w-4 h-4 animate-spin" />}
+                  Simpan
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Add More Questions Modal */}
+      {addingToMaterial && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 w-full max-w-md shadow-xl border border-slate-200 dark:border-slate-800 transition-colors duration-300">
+            <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">Tambah Soal ke {addingToMaterial.title}</h3>
+            <p className="text-sm text-gray-500 dark:text-slate-400 mb-6">Sistem akan mengekstrak soal baru dan menambahkannya ke library ini. Soal yang sama tidak akan diduplikasi.</p>
+            
+            <form onSubmit={handleAddMoreQuestions} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">Sumber Materi Baru</label>
+                <div className="flex gap-4 mb-3">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input 
+                      type="radio" 
+                      name="updateInputType" 
+                      value="file" 
+                      checked={inputType === 'file'} 
+                      onChange={() => setInputType('file')}
+                    />
+                    <span className="text-sm text-gray-700 dark:text-slate-300">Upload File</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input 
+                      type="radio" 
+                      name="updateInputType" 
+                      value="url" 
+                      checked={inputType === 'url'} 
+                      onChange={() => setInputType('url')}
+                    />
+                    <span className="text-sm text-gray-700 dark:text-slate-300">Google Spreadsheet URL</span>
+                  </label>
+                </div>
+
+                {inputType === 'file' ? (
+                  <input 
+                    type="file" 
+                    required={inputType === 'file'}
+                    accept=".pdf,.docx,.xlsx,.xls,image/*"
+                    onChange={e => setNewMaterialFile(e.target.files?.[0] || null)}
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-gray-900 dark:text-white rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition-colors duration-300"
+                  />
+                ) : (
+                  <input 
+                    type="url" 
+                    required={inputType === 'url'}
+                    value={newMaterialUrl || ''}
+                    onChange={e => setNewMaterialUrl(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-gray-900 dark:text-white rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition-colors duration-300"
+                    placeholder="https://docs.google.com/spreadsheets/... atau form URL"
+                  />
+                )}
+              </div>
+              <div className="flex justify-end gap-3 mt-6">
+                <button 
+                  type="button" 
+                  onClick={() => {
+                    setAddingToMaterial(null);
+                    setNewMaterialFile(null);
+                    setNewMaterialUrl('');
+                  }}
+                  disabled={isUpdating}
+                  className="px-4 py-2 text-gray-600 dark:text-slate-400 hover:bg-gray-100 dark:hover:bg-slate-800 rounded-lg font-medium transition-colors"
+                >
+                  Batal
+                </button>
+                <button 
+                  type="submit" 
+                  disabled={isUpdating || (inputType === 'file' ? !newMaterialFile : !newMaterialUrl)}
+                  className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-400 text-white rounded-lg font-medium transition-colors shadow-sm"
+                >
+                  {isUpdating ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                  {isUpdating ? 'Memproses...' : 'Tambah Soal'}
                 </button>
               </div>
             </form>
