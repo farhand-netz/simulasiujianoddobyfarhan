@@ -11,6 +11,7 @@ import { QuizQuestion } from './services/gemini';
 import { BrainCircuit, LogIn, LogOut, Loader2, Moon, Sun } from 'lucide-react';
 import { auth, signInWithGoogle, logOut } from './firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
+import { Analytics } from '@vercel/analytics/react';
 
 export default function App() {
   const [quiz, setQuiz] = useState<QuizQuestion[] | null>(null);
@@ -138,6 +139,7 @@ export default function App() {
           <p className="text-xs text-slate-400 dark:text-slate-500 font-medium tracking-wide">Version 1.2</p>
         </div>
       </footer>
+      <Analytics />
     </div>
   );
 }
