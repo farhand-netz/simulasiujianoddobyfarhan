@@ -7,6 +7,7 @@ import { collection, onSnapshot, addDoc, deleteDoc, doc, serverTimestamp, update
 interface UploadSectionProps {
   onQuizGenerated: (quiz: QuizQuestion[], materialId?: string) => void;
   isAdmin: boolean;
+  onGlobalScan?: (allQuestions: QuizQuestion[]) => void;
 }
 
 interface Material {
@@ -52,7 +53,7 @@ function calculateSimilarity(str1: string, str2: string): number {
   return Math.round((2.0 * intersection) / (bg1.length + bg2.length) * 100);
 }
 
-export function UploadSection({ onQuizGenerated, isAdmin }: UploadSectionProps) {
+export function UploadSection({ onQuizGenerated, isAdmin, onGlobalScan }: UploadSectionProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   
@@ -320,17 +321,40 @@ export function UploadSection({ onQuizGenerated, isAdmin }: UploadSectionProps) 
 
       {/* Search Section */}
       <div className="bg-white dark:bg-slate-900 p-6 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-800 transition-colors duration-300">
-        <div className="relative">
-          <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-            <Search className="h-5 w-5 text-gray-400 dark:text-slate-500" />
+        <div className="flex items-center gap-2">
+          <div className="relative flex-1">
+            <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+              <Search className="h-5 w-5 text-gray-400 dark:text-slate-500" />
+            </div>
+            <input
+              type="text"
+              value={searchQuery || ''}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Cari pertanyaan dari semua library..."
+              className="block w-full pl-11 pr-4 py-3 border border-gray-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-gray-50 dark:bg-slate-800 text-gray-900 dark:text-white transition-colors duration-300"
+            />
           </div>
-          <input
-            type="text"
-            value={searchQuery || ''}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Cari pertanyaan dari semua library..."
-            className="block w-full pl-11 pr-4 py-3 border border-gray-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-gray-50 dark:bg-slate-800 text-gray-900 dark:text-white transition-colors duration-300"
-          />
+          {onGlobalScan && (
+            <button
+              onClick={() => {
+                const allQs: QuizQuestion[] = [];
+                materials.forEach(m => {
+                  if (m.quizData) {
+                    try {
+                      allQs.push(...JSON.parse(m.quizData));
+                    } catch (e) {}
+                  }
+                });
+                onGlobalScan(allQs);
+              }}
+              className="flex items-center justify-center p-3 sm:px-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl transition-all shadow-md shadow-indigo-600/20 gap-2 font-medium flex-shrink-0"
+              title="Camera Scan Semua Soal"
+            >
+              {/* @ts-ignore */}
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/></svg>
+              <span className="hidden sm:inline">Scan Foto</span>
+            </button>
+          )}
         </div>
         
         {searchQuery.length >= 3 && (
