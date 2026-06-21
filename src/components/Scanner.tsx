@@ -123,7 +123,12 @@ export function Scanner({ quiz, onClose }: ScannerProps) {
               audio={false}
               ref={webcamRef}
               screenshotFormat="image/jpeg"
-              videoConstraints={{ facingMode: "environment" }}
+              screenshotQuality={1}
+              videoConstraints={{ 
+                width: { ideal: 1920 },
+                height: { ideal: 1080 },
+                facingMode: "environment" 
+              }}
               className="absolute min-w-full min-h-full object-cover"
             />
             
