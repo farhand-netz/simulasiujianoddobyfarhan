@@ -2,7 +2,7 @@ import React, { useRef, useState, useCallback } from 'react';
 import Webcam from 'react-webcam';
 import Tesseract from 'tesseract.js';
 import stringSimilarity from 'string-similarity';
-import { Camera, X, Loader2, ArrowLeft, RefreshCw, CheckCircle2 } from 'lucide-react';
+import { Camera, X, Loader2, ArrowLeft, RefreshCw, CheckCircle2, Search } from 'lucide-react';
 import { QuizQuestion } from '../services/gemini';
 
 interface ScannerProps {
@@ -13,6 +13,7 @@ interface ScannerProps {
 export function Scanner({ quiz, onClose }: ScannerProps) {
   const webcamRef = useRef<Webcam>(null);
   const [isScanning, setIsScanning] = useState(false);
+  const [scannedText, setScannedText] = useState<string | null>(null);
   const [result, setResult] = useState<{
     bestMatch: QuizQuestion;
     confidence: number;
@@ -29,6 +30,7 @@ export function Scanner({ quiz, onClose }: ScannerProps) {
     setIsScanning(true);
     setError(null);
     setResult(null);
+    setScannedText(null);
 
     try {
       // Run OCR using Tesseract (non-AI method)
@@ -38,14 +40,28 @@ export function Scanner({ quiz, onClose }: ScannerProps) {
         { logger: m => console.log(m) }
       );
 
-      const scannedText = tesseractResult.data.text.trim();
+      const text = tesseractResult.data.text.trim();
       
-      if (!scannedText || scannedText.length < 5) {
+      if (!text || text.length < 5) {
         throw new Error("Tidak ada teks yang terbaca. Pastikan soal masuk ke dalam layar.");
       }
 
-      console.log("Scanned text:", scannedText);
+      console.log("Scanned text:", text);
+      setScannedText(text);
 
+    } catch (err: any) {
+      setError(err.message || "Gagal melakukan scan.");
+    } finally {
+      setIsScanning(false);
+    }
+  }, []);
+
+  const handleSearch = () => {
+    if (!scannedText) return;
+    
+    setError(null);
+    
+    try {
       // Simple string similarity calculation to find best matching question
       const questionTexts = quiz.map(q => q.question);
       const matchRatings = stringSimilarity.findBestMatch(scannedText, questionTexts);
@@ -53,23 +69,20 @@ export function Scanner({ quiz, onClose }: ScannerProps) {
       const bestMatchIndex = matchRatings.bestMatchIndex;
       const confidence = matchRatings.bestMatch.rating;
 
-      // Generally, > 0.1 confidence means it might have caught something if text is poorly scanned,
-      // but let's be generous
+      // Generally, > 0.1 confidence means it might have caught something if text is poorly scanned
       if (confidence < 0.1) {
-        throw new Error("Soal tidak ditemukan di database. Coba scan ulang dengan lebih jelas.");
+        throw new Error("Soal tidak ditemukan di database. Coba scan ulang atau edit teks agar lebih relevan.");
       }
 
       setResult({
         bestMatch: quiz[bestMatchIndex],
         confidence
       });
-
+      setScannedText(null);
     } catch (err: any) {
-      setError(err.message || "Gagal melakukan scan.");
-    } finally {
-      setIsScanning(false);
+      setError(err.message || "Gagal melakukan pencarian.");
     }
-  }, [quiz]);
+  };
 
   return (
     <div className="fixed inset-0 z-50 bg-black flex flex-col">
@@ -84,10 +97,50 @@ export function Scanner({ quiz, onClose }: ScannerProps) {
 
       {/* Main Scanner View */}
       <div className="relative flex-grow flex items-center justify-center overflow-hidden">
-        {result ? (
+        {scannedText !== null && !result ? (
+          <div className="w-full max-w-lg mx-auto p-4 z-10 relative mt-16 animate-in slide-in-from-bottom flex flex-col justify-center h-full">
+            <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl p-6 border border-slate-200 dark:border-slate-800">
+              <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-4">Edit Teks Hasil Scan:</h3>
+              <textarea
+                value={scannedText}
+                onChange={(e) => setScannedText(e.target.value)}
+                className="w-full h-40 p-4 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-200 mb-6 focus:ring-2 focus:ring-indigo-500 focus:outline-none resize-none"
+              />
+              
+              {error && (
+                <div className="bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 p-3 rounded-lg text-sm mb-4">
+                  {error}
+                </div>
+              )}
+
+              <div className="flex gap-3">
+                <button 
+                  onClick={() => {
+                    setScannedText(null);
+                    setError(null);
+                  }}
+                  className="flex-1 py-3 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl font-bold transition-all"
+                >
+                  Batal
+                </button>
+                <button 
+                  onClick={handleSearch}
+                  className="flex-1 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold shadow-lg shadow-indigo-600/30 transition-all flex items-center justify-center gap-2"
+                >
+                  <Search className="w-5 h-5" /> Cari Soal
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : result ? (
           <div className="w-full max-w-lg mx-auto p-4 z-10 relative mt-16 animate-in slide-in-from-bottom flex flex-col justify-center h-full">
              <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl p-6 border border-slate-200 dark:border-slate-800">
-               <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-4">Soal Ditemukan:</h3>
+               <div className="flex items-center justify-between mb-4">
+                 <h3 className="text-xl font-bold text-gray-900 dark:text-white">Soal Ditemukan:</h3>
+                 <span className="text-sm font-semibold bg-indigo-100 dark:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 px-3 py-1 rounded-full">
+                   Kecocokan: {Math.round(result.confidence * 100)}%
+                 </span>
+               </div>
                <p className="text-slate-700 dark:text-slate-300 mb-6 bg-slate-50 dark:bg-slate-800 p-4 rounded-xl">
                  {result.bestMatch.question}
                </p>
