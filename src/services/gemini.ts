@@ -25,7 +25,7 @@ export interface QuizQuestion {
 export async function generateQuizFromText(text: string): Promise<QuizQuestion[]> {
   const ai = getAI();
   const response = await ai.models.generateContent({
-    model: "gemini-3.5-flash",
+    model: "gemini-3.8-flash",
     contents: `Ekstrak SEMUA (seluruh) pertanyaan dan pilihan jawaban pilihan ganda dari teks kuis berikut. 
 SANGAT PENTING: 
 1. JANGAN LEWATI SATU PUN PERTANYAAN. Jika teks kuis memiliki nomor urut (contoh: 1, 2, 3, ...), pastikan SEMUA nomor tersebut Anda ambil secara lengkap tanpa ada yang terlewatkan (termasuk nomor 9, 10, dst).
@@ -80,7 +80,7 @@ ${text}`,
 export async function generateQuizFromSheetText(sheetName: string, text: string): Promise<QuizQuestion[]> {
   const ai = getAI();
   const response = await ai.models.generateContent({
-    model: "gemini-3.5-flash",
+    model: "gemini-3.8-flash",
     contents: `Ekstrak SEMUA (seluruh) pertanyaan dan pilihan jawaban dari teks Excel berikut (dari Sheet "${sheetName}").
 
 Teks Excel dapat berupa daftar baris terstruktur dalam format key-value atau dipisahkan oleh pipa '|'.
@@ -302,6 +302,17 @@ function mapAnswerValueToIndices(answerVal: string, options: string[]): number[]
   return result;
 }
 
+function clampSheetJSRange(worksheet: XLSX.WorkSheet, maxRows = 3000): void {
+  if (!worksheet || !worksheet['!ref']) return;
+  try {
+    const range = XLSX.utils.decode_range(worksheet['!ref']);
+    if (range.e.r - range.s.r > maxRows) {
+      range.e.r = range.s.r + maxRows;
+      worksheet['!ref'] = XLSX.utils.encode_range(range);
+    }
+  } catch (e) {}
+}
+
 function tryDirectTypeScriptParse(worksheet: ExcelJS.Worksheet): QuizQuestion[] {
   const questions: QuizQuestion[] = [];
   const totalRows = worksheet.rowCount;
@@ -310,13 +321,13 @@ function tryDirectTypeScriptParse(worksheet: ExcelJS.Worksheet): QuizQuestion[] 
   let headerRowIndex = -1;
   const colIndices: Record<string, number> = {};
 
-  // Find header row that contains a questions word
+  // Find header row that contains a questions word (only scan first 15 rows)
   for (let r = 1; r <= Math.min(totalRows, 15); r++) {
     const row = worksheet.getRow(r);
     let isHeader = false;
     const tempCols: Record<string, number> = {};
 
-    row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+    row.eachCell({ includeEmpty: false }, (cell, colNumber) => {
       const val = getCellValue(cell).trim();
       if (val) {
         const type = getHeaderColumnType(val);
@@ -345,7 +356,7 @@ function tryDirectTypeScriptParse(worksheet: ExcelJS.Worksheet): QuizQuestion[] 
   if (!hasOptions) {
     let optCount = 0;
     const qCol = colIndices['question'];
-    const maxCols = worksheet.columnCount || 10;
+    const maxCols = Math.min(worksheet.columnCount || 10, 26);
     for (let c = qCol + 1; c <= maxCols; c++) {
       if (c === colIndices['jawaban']) continue;
       if (optCount < 5) {
@@ -356,10 +367,20 @@ function tryDirectTypeScriptParse(worksheet: ExcelJS.Worksheet): QuizQuestion[] 
     }
   }
 
-  for (let r = headerRowIndex + 1; r <= totalRows; r++) {
+  const maxRowToScan = Math.min(totalRows, 3000);
+  let emptyRowCount = 0;
+
+  for (let r = headerRowIndex + 1; r <= maxRowToScan; r++) {
     const row = worksheet.getRow(r);
     const qText = getCellValue(row.getCell(colIndices['question'])).trim();
-    if (!qText) continue;
+    if (!qText) {
+      emptyRowCount++;
+      if (emptyRowCount > 25) {
+        break; // Stop scanning when 25 consecutive rows have no question text
+      }
+      continue;
+    }
+    emptyRowCount = 0;
 
     const options: string[] = [];
     const validColNumbers: number[] = [];
@@ -433,7 +454,8 @@ function tryDirectTypeScriptParse(worksheet: ExcelJS.Worksheet): QuizQuestion[] 
 }
 
 function tryDirectTypeScriptParseSheetJS(worksheet: XLSX.WorkSheet, sheetName: string): QuizQuestion[] {
-  const rows = XLSX.utils.sheet_to_json<any[]>(worksheet, { header: 1, defval: "" });
+  clampSheetJSRange(worksheet, 3000);
+  const rows = XLSX.utils.sheet_to_json<any[]>(worksheet, { header: 1, blankrows: false });
   if (rows.length === 0) return [];
 
   let headerRowIndex = -1;
@@ -475,7 +497,7 @@ function tryDirectTypeScriptParseSheetJS(worksheet: XLSX.WorkSheet, sheetName: s
     let optCount = 0;
     const qCol = colIndices['question'];
     const headerRow = rows[headerRowIndex];
-    const maxCols = headerRow ? headerRow.length : 10;
+    const maxCols = Math.min(headerRow ? headerRow.length : 10, 26);
     for (let c = qCol + 1; c < maxCols; c++) {
       if (c === colIndices['jawaban']) continue;
       if (optCount < 5) {
@@ -487,13 +509,23 @@ function tryDirectTypeScriptParseSheetJS(worksheet: XLSX.WorkSheet, sheetName: s
   }
 
   const questions: QuizQuestion[] = [];
+  let emptyRowCount = 0;
 
   for (let r = headerRowIndex + 1; r < rows.length; r++) {
     const row = rows[r];
-    if (!row) continue;
+    if (!row || row.length === 0) {
+      emptyRowCount++;
+      if (emptyRowCount > 25) break;
+      continue;
+    }
 
     const qText = String(row[colIndices['question']] || '').trim();
-    if (!qText) continue;
+    if (!qText) {
+      emptyRowCount++;
+      if (emptyRowCount > 25) break;
+      continue;
+    }
+    emptyRowCount = 0;
 
     const options: string[] = [];
 
@@ -554,7 +586,6 @@ function tryDirectTypeScriptParseSheetJS(worksheet: XLSX.WorkSheet, sheetName: s
 }
 
 function parseExcelJSWorksheet(worksheet: ExcelJS.Worksheet): string {
-  let sheetText = '';
   const totalRows = worksheet.rowCount;
   const totalCols = worksheet.columnCount;
   
@@ -569,7 +600,7 @@ function parseExcelJSWorksheet(worksheet: ExcelJS.Worksheet): string {
     const rowValues: string[] = [];
     let hasPertanyaan = false;
     
-    row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+    row.eachCell({ includeEmpty: false }, (cell, colNumber) => {
       const val = getCellValue(cell).trim();
       rowValues[colNumber] = val;
       const lower = val.toLowerCase();
@@ -587,11 +618,11 @@ function parseExcelJSWorksheet(worksheet: ExcelJS.Worksheet): string {
   
   // Fallback to first non-empty row if no specific keywords
   if (headers.length === 0) {
-    for (let r = 1; r <= totalRows; r++) {
+    for (let r = 1; r <= Math.min(totalRows, 15); r++) {
       const row = worksheet.getRow(r);
       const rowValues: string[] = [];
       let hasContent = false;
-      row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+      row.eachCell({ includeEmpty: false }, (cell, colNumber) => {
         const val = getCellValue(cell).trim();
         if (val) {
           rowValues[colNumber] = val;
@@ -609,13 +640,14 @@ function parseExcelJSWorksheet(worksheet: ExcelJS.Worksheet): string {
   // Generic header names fallback
   if (headers.length === 0) {
     headers = [];
-    for (let c = 1; c <= Math.max(totalCols, 12); c++) {
+    const maxCols = Math.min(Math.max(totalCols, 12), 26);
+    for (let c = 1; c <= maxCols; c++) {
       headers[c] = `Kolom ${String.fromCharCode(64 + c)}`;
     }
   }
   
-  // Ensure every read column has a non-empty header representation
-  for (let c = 1; c <= Math.max(totalCols, headers.length); c++) {
+  const maxScanCols = Math.min(Math.max(totalCols, headers.length), 30);
+  for (let c = 1; c <= maxScanCols; c++) {
     if (!headers[c]) {
       headers[c] = `Kolom ${String.fromCharCode(64 + c)}`;
     }
@@ -623,13 +655,15 @@ function parseExcelJSWorksheet(worksheet: ExcelJS.Worksheet): string {
   
   let dataRowsStr = '';
   let validRowCount = 0;
+  let emptyRowCount = 0;
+  const maxRowToScan = Math.min(totalRows, 3000);
   
-  for (let r = headerRowIndex + 1; r <= totalRows; r++) {
+  for (let r = headerRowIndex + 1; r <= maxRowToScan; r++) {
     const row = worksheet.getRow(r);
     const rowData: Record<string, string> = {};
     let hasContent = false;
     
-    row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+    row.eachCell({ includeEmpty: false }, (cell, colNumber) => {
       let val = getCellValue(cell).trim();
       if (val) {
         hasContent = true;
@@ -661,12 +695,18 @@ function parseExcelJSWorksheet(worksheet: ExcelJS.Worksheet): string {
     });
     
     if (hasContent) {
+      emptyRowCount = 0;
       dataRowsStr += `- Row ${r}:\n`;
       for (const [key, val] of Object.entries(rowData)) {
         dataRowsStr += `  ${key}: "${val.replace(/"/g, '\\"')}"\n`;
       }
       dataRowsStr += '\n';
       validRowCount++;
+    } else {
+      emptyRowCount++;
+      if (emptyRowCount > 25) {
+        break;
+      }
     }
   }
   
@@ -677,7 +717,8 @@ function parseExcelJSWorksheet(worksheet: ExcelJS.Worksheet): string {
 }
 
 function parseSheetJSWorksheet(worksheet: XLSX.WorkSheet): string {
-  const rows = XLSX.utils.sheet_to_json<any[]>(worksheet, { header: 1, defval: "" });
+  clampSheetJSRange(worksheet, 3000);
+  const rows = XLSX.utils.sheet_to_json<any[]>(worksheet, { header: 1, blankrows: false });
   if (rows.length === 0) return '';
   
   let headerRowIndex = 0;
@@ -704,7 +745,7 @@ function parseSheetJSWorksheet(worksheet: XLSX.WorkSheet): string {
   
   // Fallback if no keywords found in first rows
   if (headers.length === 0) {
-    for (let r = 0; r < rows.length; r++) {
+    for (let r = 0; r < Math.min(rows.length, 15); r++) {
       const row = rows[r];
       if (row && row.some(v => String(v || '').trim())) {
         headerRowIndex = r;
@@ -714,7 +755,13 @@ function parseSheetJSWorksheet(worksheet: XLSX.WorkSheet): string {
     }
   }
   
-  const maxColsInSheet = Math.max(...rows.map(r => r ? r.length : 0), 12);
+  let maxColsInSheet = 12;
+  for (const r of rows) {
+    if (r && r.length > maxColsInSheet) {
+      maxColsInSheet = Math.min(r.length, 30);
+    }
+  }
+  
   if (headers.length === 0) {
     headers = [];
     for (let c = 0; c < maxColsInSheet; c++) {
@@ -730,10 +777,15 @@ function parseSheetJSWorksheet(worksheet: XLSX.WorkSheet): string {
   
   let dataRowsStr = '';
   let validRowCount = 0;
+  let emptyRowCount = 0;
   
   for (let r = headerRowIndex + 1; r < rows.length; r++) {
     const row = rows[r];
-    if (!row) continue;
+    if (!row) {
+      emptyRowCount++;
+      if (emptyRowCount > 25) break;
+      continue;
+    }
     
     const rowData: Record<string, string> = {};
     let hasContent = false;
@@ -747,12 +799,16 @@ function parseSheetJSWorksheet(worksheet: XLSX.WorkSheet): string {
     }
     
     if (hasContent) {
+      emptyRowCount = 0;
       dataRowsStr += `- Row ${r + 1}:\n`;
       for (const [key, val] of Object.entries(rowData)) {
         dataRowsStr += `  ${key}: "${val.replace(/"/g, '\\"')}"\n`;
       }
       dataRowsStr += '\n';
       validRowCount++;
+    } else {
+      emptyRowCount++;
+      if (emptyRowCount > 25) break;
     }
   }
   
@@ -870,6 +926,67 @@ export async function generateQuizFromXlsx(file: File): Promise<QuizQuestion[]> 
   return generateQuizFromXlsxBuffer(arrayBuffer);
 }
 
+export async function fetchGoogleSheetAsXlsxBuffer(sheetUrl: string): Promise<ArrayBuffer> {
+  // 1. Try proxy first (works in local dev / Express server)
+  try {
+    const proxyRes = await fetch(`/api/proxy/gsheet?url=${encodeURIComponent(sheetUrl)}`);
+    if (proxyRes.ok) {
+      const contentType = proxyRes.headers.get('content-type') || '';
+      // If server returned HTML (e.g. index.html on SPA router / Vercel), don't treat as xlsx
+      if (!contentType.includes('text/html')) {
+        const buffer = await proxyRes.arrayBuffer();
+        if (buffer && buffer.byteLength > 100) {
+          return buffer;
+        }
+      }
+    }
+  } catch (e) {
+    console.warn("Proxy fetch failed, falling back to direct Google Sheets export...", e);
+  }
+
+  // 2. Extract sheet ID
+  const idMatch = sheetUrl.match(/\/d\/([a-zA-Z0-9-_]+)/);
+  if (!idMatch || idMatch.length < 2) {
+    throw new Error("URL Google Sheets tidak valid. Pastikan link memiliki format: https://docs.google.com/spreadsheets/d/.../edit");
+  }
+  const sheetId = idMatch[1];
+
+  // 3. Try direct XLSX export
+  try {
+    const directUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=xlsx`;
+    const directRes = await fetch(directUrl);
+    if (directRes.ok) {
+      const contentType = directRes.headers.get('content-type') || '';
+      if (!contentType.includes('text/html')) {
+        const buffer = await directRes.arrayBuffer();
+        if (buffer && buffer.byteLength > 100) {
+          return buffer;
+        }
+      }
+    }
+  } catch (directErr) {
+    console.warn("Direct XLSX export failed (CORS), trying public CSV...", directErr);
+  }
+
+  // 4. Try public CSV export (CORS enabled on Google Sheets gviz)
+  try {
+    const csvUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv`;
+    const csvRes = await fetch(csvUrl);
+    if (csvRes.ok) {
+      const csvText = await csvRes.text();
+      if (csvText && csvText.trim().length > 0 && !csvText.includes('<!DOCTYPE html>')) {
+        const wb = XLSX.read(csvText, { type: 'string' });
+        const xlsxArray = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
+        return xlsxArray as ArrayBuffer;
+      }
+    }
+  } catch (csvErr) {
+    console.error("Public CSV export failed:", csvErr);
+  }
+
+  throw new Error("Gagal mengunduh Google Sheet. Pastikan akses Google Sheet diatur ke 'Siapa saja yang memiliki tautan' (Anyone with the link can view).");
+}
+
 export async function generateQuizFromImage(file: File): Promise<QuizQuestion[]> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -880,7 +997,7 @@ export async function generateQuizFromImage(file: File): Promise<QuizQuestion[]>
         
         const ai = getAI();
         const response = await ai.models.generateContent({
-          model: "gemini-3.5-flash",
+          model: "gemini-3.8-flash",
           contents: [
             {
               inlineData: {
@@ -945,7 +1062,7 @@ export async function generateQuizFromPdf(file: File): Promise<QuizQuestion[]> {
         
         const ai = getAI();
         const response = await ai.models.generateContent({
-          model: "gemini-3.5-flash",
+          model: "gemini-3.8-flash",
           contents: [
             {
               inlineData: {
@@ -1027,7 +1144,7 @@ export async function generateQuizFromUrl(url: string): Promise<QuizQuestion[]> 
 
     const ai = getAI();
     const response = await ai.models.generateContent({
-      model: "gemini-3.5-flash",
+      model: "gemini-3.8-flash",
       contents: `Ekstrak SEMUA (seluruh) pertanyaan dan pilihan jawaban pilihan ganda dari kode sumber HTML atau teks berikut ini.
 Bila ini adalah Google Form, carilah soal pada tag script FB_PUBLIC_LOAD_DATA_ atau pada elemen teks di dalamnya.
       
