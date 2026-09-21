@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Loader2, BookOpen, Plus, Trash2, Search, Percent, Edit2, FilePlus } from 'lucide-react';
-import { generateQuizFromPdf, generateQuizFromDocx, generateQuizFromXlsx, generateQuizFromXlsxBuffer, generateQuizFromImage, generateQuizFromUrl, QuizQuestion } from '../services/gemini';
+import { generateQuizFromPdf, generateQuizFromDocx, generateQuizFromXlsx, generateQuizFromXlsxBuffer, generateQuizFromImage, generateQuizFromUrl, fetchGoogleSheetAsXlsxBuffer, QuizQuestion } from '../services/gemini';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { collection, onSnapshot, addDoc, deleteDoc, doc, serverTimestamp, updateDoc } from 'firebase/firestore';
 
@@ -100,12 +100,7 @@ export function UploadSection({ onQuizGenerated, isAdmin, onGlobalScan }: Upload
       
       if (inputType === 'url') {
         if (newMaterialUrl.includes('docs.google.com/spreadsheets')) {
-          const proxyResponse = await fetch(`/api/proxy/gsheet?url=${encodeURIComponent(newMaterialUrl)}`);
-          if (!proxyResponse.ok) {
-            const errorData = await proxyResponse.json().catch(() => ({}));
-            throw new Error(errorData.error || 'Gagal mengunduh Google Sheet. Pastikan link valid dan dapat diakses publik.');
-          }
-          const arrayBuffer = await proxyResponse.arrayBuffer();
+          const arrayBuffer = await fetchGoogleSheetAsXlsxBuffer(newMaterialUrl);
           quiz = await generateQuizFromXlsxBuffer(arrayBuffer);
         } else {
           quiz = await generateQuizFromUrl(newMaterialUrl);
@@ -286,7 +281,10 @@ export function UploadSection({ onQuizGenerated, isAdmin, onGlobalScan }: Upload
   };
 
   const searchResults = useMemo(() => {
-    if (!searchQuery.trim() || searchQuery.length < 3) return [];
+    if (!searchQuery.trim()) return [];
+    
+    const query = searchQuery.toLowerCase().trim();
+    const queryWords = query.split(/\s+/).filter(w => w.length > 0);
     
     const results: SearchResult[] = [];
     materials.forEach(material => {
@@ -294,13 +292,29 @@ export function UploadSection({ onQuizGenerated, isAdmin, onGlobalScan }: Upload
       try {
         const quiz: QuizQuestion[] = JSON.parse(material.quizData);
         quiz.forEach(q => {
-          const similarity = calculateSimilarity(searchQuery, q.question);
-          if (similarity > 15) { // Minimum threshold
+          const questionText = q.question.toLowerCase();
+          
+          let score = 0;
+          if (questionText.includes(query)) {
+            // Full match gets top score
+            score = 100;
+          } else if (queryWords.every(w => questionText.includes(w))) {
+            // All words match but not exactly in order
+            score = 90;
+          } else if (queryWords.some(w => questionText.includes(w)) && queryWords.length > 1) {
+             // Some words match
+             score = 70;
+          } else {
+             // Fallback to bigram similarity
+             score = calculateSimilarity(searchQuery, q.question);
+          }
+          
+          if (score > 10) { // Minimum threshold
             results.push({
               question: q,
               materialTitle: material.title,
               materialIcon: material.icon,
-              similarity
+              similarity: score
             });
           }
         });
@@ -357,7 +371,7 @@ export function UploadSection({ onQuizGenerated, isAdmin, onGlobalScan }: Upload
           )}
         </div>
         
-        {searchQuery.length >= 3 && (
+        {searchQuery.trim().length > 0 && (
           <div className="mt-4 space-y-3">
             <h4 className="text-sm font-medium text-gray-500 dark:text-slate-400 uppercase tracking-wider">Hasil Pencarian</h4>
             {searchResults.length === 0 ? (

@@ -1,6 +1,6 @@
-import React, { useState, useMemo } from 'react';
-import { QuizQuestion, generateQuizFromPdf, generateQuizFromDocx, generateQuizFromXlsx, generateQuizFromXlsxBuffer, generateQuizFromImage } from '../services/gemini';
-import { Play, CheckCircle2, ArrowLeft, Edit2, Save, X, Plus, Trash2, Loader2, Shuffle, Dices, FilePlus } from 'lucide-react';
+import React, { useState, useMemo, useEffect } from 'react';
+import { QuizQuestion, generateQuizFromPdf, generateQuizFromDocx, generateQuizFromXlsx, generateQuizFromXlsxBuffer, generateQuizFromImage, fetchGoogleSheetAsXlsxBuffer } from '../services/gemini';
+import { Play, CheckCircle2, ArrowLeft, Edit2, Save, X, Plus, Trash2, Loader2, Shuffle, Dices, FilePlus, ChevronLeft, ChevronRight } from 'lucide-react';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { doc, updateDoc } from 'firebase/firestore';
 
@@ -34,6 +34,25 @@ export function QuizPreview({ quiz: initialQuiz, materialId, isAdmin, onStart, o
 
   const questionsPerPage = 10;
   const totalParts = Math.ceil(quiz.length / questionsPerPage);
+
+  // Preview List Pagination (prevents DOM overload on large datasets)
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 20;
+  const totalPages = Math.max(1, Math.ceil(quiz.length / itemsPerPage));
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [totalPages, currentPage]);
+
+  const displayedQuestions = useMemo(() => {
+    const startIndex = (currentPage - 1) * itemsPerPage;
+    return quiz.slice(startIndex, startIndex + itemsPerPage).map((q, idx) => ({
+      question: q,
+      actualIndex: startIndex + idx
+    }));
+  }, [quiz, currentPage, itemsPerPage]);
 
   const handleReshuffle = () => {
     let newQuiz = [...quiz];
@@ -249,12 +268,7 @@ export function QuizPreview({ quiz: initialQuiz, materialId, isAdmin, onStart, o
       let newQuestions: QuizQuestion[];
       
       if (inputType === 'url') {
-        const proxyResponse = await fetch(`/api/proxy/gsheet?url=${encodeURIComponent(newMaterialUrl)}`);
-        if (!proxyResponse.ok) {
-          const errorData = await proxyResponse.json().catch(() => ({}));
-          throw new Error(errorData.error || 'Gagal mengunduh Google Sheet.');
-        }
-        const arrayBuffer = await proxyResponse.arrayBuffer();
+        const arrayBuffer = await fetchGoogleSheetAsXlsxBuffer(newMaterialUrl);
         newQuestions = await generateQuizFromXlsxBuffer(arrayBuffer);
       } else if (newMaterialFile) {
         if (newMaterialFile.type === 'application/pdf' || newMaterialFile.name.endsWith('.pdf')) {
@@ -408,7 +422,7 @@ export function QuizPreview({ quiz: initialQuiz, materialId, isAdmin, onStart, o
       </div>
 
       <div className="space-y-4">
-        {quiz.map((q, i) => (
+        {displayedQuestions.map(({ question: q, actualIndex: i }) => (
           <div key={i} className="bg-white dark:bg-slate-900 p-6 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-800">
             {editingIndex === i && editForm ? (
               <div className="space-y-4">
@@ -555,6 +569,34 @@ export function QuizPreview({ quiz: initialQuiz, materialId, isAdmin, onStart, o
           </div>
         ))}
       </div>
+
+      {/* Pagination Controls */}
+      {totalPages > 1 && (
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-4 px-3 bg-white dark:bg-slate-900 rounded-2xl border border-gray-100 dark:border-slate-800 shadow-sm">
+          <p className="text-sm text-gray-500 dark:text-slate-400">
+            Menampilkan soal <span className="font-medium text-gray-900 dark:text-white">{(currentPage - 1) * itemsPerPage + 1} - {Math.min(currentPage * itemsPerPage, quiz.length)}</span> dari <span className="font-medium text-gray-900 dark:text-white">{quiz.length}</span> soal
+          </p>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+              disabled={currentPage === 1}
+              className="px-3 py-2 border border-gray-300 dark:border-slate-700 rounded-lg text-sm font-medium text-gray-700 dark:text-slate-300 hover:bg-gray-50 dark:hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1 transition-colors"
+            >
+              <ChevronLeft className="w-4 h-4" /> Sebelumnya
+            </button>
+            <span className="text-sm font-semibold text-gray-700 dark:text-slate-300 px-2">
+              Halaman {currentPage} / {totalPages}
+            </span>
+            <button
+              onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+              disabled={currentPage === totalPages}
+              className="px-3 py-2 border border-gray-300 dark:border-slate-700 rounded-lg text-sm font-medium text-gray-700 dark:text-slate-300 hover:bg-gray-50 dark:hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1 transition-colors"
+            >
+              Berikutnya <ChevronRight className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Add More Questions Modal */}
       {showAddMoreModal && (

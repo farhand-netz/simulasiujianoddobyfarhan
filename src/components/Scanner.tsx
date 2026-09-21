@@ -262,8 +262,8 @@ export function Scanner({ quiz, onClose }: ScannerProps) {
               screenshotFormat="image/jpeg"
               screenshotQuality={1}
               videoConstraints={{ 
-                width: { ideal: 3072 },
-                height: { ideal: 1728 },
+                width: { ideal: 2592 },
+                height: { ideal: 4608 },
                 facingMode: "environment" 
               }}
               className="absolute min-w-full min-h-full object-cover"
